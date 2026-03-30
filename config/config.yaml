@@ -1,0 +1,29 @@
+# Log Warning Assistant Configuration
+
+llm:
+  provider: "minimax"
+  model: "MiniMax-M2.7"
+  api_key: "${MINIMAX_API_KEY}"
+  base_url: "https://api.minimax.chat/v1"
+  temperature: 0.7
+  max_tokens: 2000
+
+tools:
+  max_workers: 4
+  timeout: 30
+
+log_parser:
+  supported_formats:
+    - "nginx"
+    - "apache"
+    - "json"
+    - "custom"
+  default_encoding: "utf-8"
+
+output:
+  format: "markdown"
+  include_raw_data: false
+
+call_log:
+  enabled: true
+  log_file: "logs/calls.log"

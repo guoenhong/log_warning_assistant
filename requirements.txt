@@ -1,0 +1,17 @@
+# Log Warning Assistant - Dependencies
+
+# LLM - MiniMax M2.7 (OpenAI-compatible API)
+openai>=1.0.0
+
+# Log parsing
+python-dateutil>=2.8.0
+
+# Configuration
+pyyaml>=6.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Utilities
+python-dotenv>=1.0.0
