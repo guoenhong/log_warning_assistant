@@ -4,7 +4,11 @@ Unit Tests for Log Parser Module
 
 import pytest
 import os
+import sys
 from datetime import datetime
+
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.log_assistant.log_parser import LogParser, LogEntry
 
@@ -30,6 +34,36 @@ def simple_log_file(tmp_path):
 2026-03-30 10:00:03 ERROR Timeout error
 """
     log_file = tmp_path / "app.log"
+    log_file.write_text(log_content)
+    return str(log_file)
+
+
+@pytest.fixture
+def iis_log_file(tmp_path):
+    """Create IIS W3C format log file"""
+    log_content = """#Software: Microsoft Internet Information Services 7.5
+#Version: 1.0
+#Date: 2017-07-04 00:00:00
+#Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) sc-status sc-substatus sc-win32-status time-taken
+2017-07-04 00:00:00 172.30.210.81 GET /api/users - 443 - 27.190.154.65 Mozilla/4.0 200 0 0 312
+2017-07-04 00:00:01 172.30.210.81 POST /api/login - 443 - 124.126.91.147 Mozilla/5.0 401 0 64 129807
+2017-07-04 00:00:02 172.30.210.81 GET /api/error - 443 - 58.246.59.145 Mozilla/5.0 500 0 0 5000
+2017-07-04 00:00:03 172.30.210.81 GET /notfound - 443 - 27.190.154.65 Mozilla/4.0 404 0 0 100
+2017-07-04 00:00:04 172.30.210.81 GET /api/slow - 443 - 58.246.59.145 Mozilla/5.0 200 0 0 30000
+"""
+    log_file = tmp_path / "iis.log"
+    log_file.write_text(log_content)
+    return str(log_file)
+
+
+@pytest.fixture
+def json_log_file(tmp_path):
+    """Create JSON format log file"""
+    log_content = """{"timestamp": "2026-03-30T10:00:00", "level": "INFO", "message": "Server started"}
+{"timestamp": "2026-03-30T10:00:01", "level": "ERROR", "message": "Database connection failed"}
+{"timestamp": "2026-03-30T10:00:02", "level": "WARNING", "message": "High memory usage: 85%"}
+"""
+    log_file = tmp_path / "app.json"
     log_file.write_text(log_content)
     return str(log_file)
 
@@ -83,6 +117,59 @@ class TestLogParser:
         assert parser._http_status_to_level(404) == 'WARNING'
         assert parser._http_status_to_level(500) == 'ERROR'
         assert parser._http_status_to_level(503) == 'ERROR'
+    
+    def test_parse_iis_log(self, iis_log_file):
+        """Test parsing IIS W3C Extended Log Format"""
+        parser = LogParser()
+        entries = parser.parse_file(iis_log_file)
+        
+        # Should skip header lines (4 lines) and parse 5 log entries
+        assert len(entries) == 5
+        
+        # First entry
+        assert entries[0].metadata.get('ip') == '27.190.154.65'
+        assert entries[0].metadata.get('status') == 200
+        assert entries[0].level == 'INFO'
+        
+        # 500 error
+        assert entries[2].metadata.get('status') == 500
+        assert entries[2].level == 'ERROR'
+        
+        # 404 error
+        assert entries[3].metadata.get('status') == 404
+        assert entries[3].level == 'WARNING'
+    
+    def test_parse_json_log(self, json_log_file):
+        """Test parsing JSON format logs"""
+        parser = LogParser()
+        entries = parser.parse_file(json_log_file)
+        
+        assert len(entries) == 3
+        assert entries[0].level == 'INFO'
+        assert entries[1].level == 'ERROR'
+        assert entries[2].level == 'WARNING'
+        assert 'Database connection failed' in entries[1].message
+    
+    def test_filter_by_time_range(self, iis_log_file):
+        """Test filtering entries by time range"""
+        parser = LogParser()
+        entries = parser.parse_file(iis_log_file)
+        
+        from datetime import datetime
+        start = datetime(2017, 7, 4, 0, 0, 2)
+        end = datetime(2017, 7, 4, 0, 0, 4)
+        
+        filtered = parser.filter_by_time_range(start, end)
+        assert len(filtered) == 3  # entries at 00:00:02, 00:00:03, 00:00:04
+    
+    def test_detect_level(self):
+        """Test log level detection from message content"""
+        parser = LogParser()
+        
+        assert parser._detect_level('ERROR: connection failed') == 'ERROR'
+        assert parser._detect_level('WARN: memory high') == 'WARNING'
+        assert parser._detect_level('DEBUG: variable x') == 'DEBUG'
+        assert parser._detect_level('Normal log message') == 'INFO'
 
 
 class TestLogEntry:

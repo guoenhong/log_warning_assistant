@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 import re
 
-from ..log_assistant.log_parser import LogParser, LogEntry
+from src.log_assistant.log_parser import LogParser, LogEntry
 
 logger = logging.getLogger(__name__)
 

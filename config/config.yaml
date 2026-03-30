@@ -3,8 +3,7 @@
 llm:
   provider: "minimax"
   model: "MiniMax-M2.7"
-  api_key: "${MINIMAX_API_KEY}"
-  base_url: "https://api.minimax.chat/v1"
+  api_key: ""
   temperature: 0.7
   max_tokens: 2000
 

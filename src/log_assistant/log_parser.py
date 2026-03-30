@@ -41,6 +41,16 @@ class LogParser:
         r'"(?P<method>\S+) (?P<path>\S+) \S+" (?P<status>\d+) (?P<size>\S+)'
     )
     
+    # IIS W3C Extended Log Format
+    # Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) sc-status sc-substatus sc-win32-status time-taken
+    IIS_LOG_PATTERN = re.compile(
+        r'^(?P<date>\d{4}-\d{2}-\d{2})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+'
+        r'(?P<s_ip>\S+)\s+(?P<method>\S+)\s+(?P<uri_stem>\S+)\s+(?P<uri_query>\S+|-)\s+'
+        r'(?P<port>\d+)\s+(?P<username>\S+|-)\s+(?P<c_ip>\S+)\s+'
+        r'(?P<user_agent>.+?)\s+(?P<status>\d+)\s+(?P<substatus>\d+)\s+'
+        r'(?P<win32_status>\d+)\s+(?P<time_taken>\d+)$'
+    )
+    
     # Simple timestamp + level + message pattern
     SIMPLE_PATTERN = re.compile(
         r'(?P<timestamp>\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}[^\s]*)\s*'
@@ -50,43 +60,63 @@ class LogParser:
     
     # JSON log pattern
     JSON_PATTERN = re.compile(r'^\s*\{.*\}\s*$')
+    
+    # Comment lines (IIS header)
+    COMMENT_PATTERN = re.compile(r'^\s*#')
 
     def __init__(self, format_type: str = "auto"):
         self.format_type = format_type
         self.entries: List[LogEntry] = []
 
-    def parse_file(self, file_path: str) -> List[LogEntry]:
+    def parse_file(self, file_path: str, encoding: str = 'utf-8') -> List[LogEntry]:
         """Parse entire log file"""
         self.entries = []
         
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    entry = self._parse_line(line, line_num)
-                    if entry:
-                        self.entries.append(entry)
+        # Try multiple encodings
+        encodings = [encoding, 'gbk', 'gb2312', 'latin-1']
+        last_error = None
+        
+        for enc in encodings:
+            self.entries = []
+            try:
+                with open(file_path, 'r', encoding=enc, errors='ignore') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line:
+                            continue
                         
-        except FileNotFoundError:
-            logger.error(f"Log file not found: {file_path}")
-            raise
-        except Exception as e:
-            logger.error(f"Error parsing log file {file_path}: {e}")
-            raise
-            
-        logger.info(f"Parsed {len(self.entries)} entries from {file_path}")
-        return self.entries
+                        entry = self._parse_line(line, line_num)
+                        if entry:
+                            self.entries.append(entry)
+                logger.info(f"Parsed {len(self.entries)} entries from {file_path} (encoding: {enc})")
+                return self.entries
+                    
+            except FileNotFoundError:
+                logger.error(f"Log file not found: {file_path}")
+                raise
+            except Exception as e:
+                last_error = e
+                continue
+        
+        logger.error(f"Error parsing log file {file_path}: {last_error}")
+        raise last_error
 
     def _parse_line(self, line: str, line_num: int) -> Optional[LogEntry]:
         """Parse single log line"""
+        # Skip comment lines (IIS header lines)
+        if self.COMMENT_PATTERN.match(line):
+            return None
+        
         # Try JSON format first
         if self.JSON_PATTERN.match(line):
             entry = self._parse_json(line)
             if entry:
                 return entry
+        
+        # Try IIS W3C format
+        match = self.IIS_LOG_PATTERN.match(line)
+        if match:
+            return self._parse_iis(match, line)
         
         # Try combined log format
         match = self.COMBINED_LOG_PATTERN.match(line)
@@ -156,6 +186,48 @@ class LogParser:
                 "ip": groups.get('ip'),
                 "status": status,
                 "size": groups.get('size')
+            }
+        )
+    
+    def _parse_iis(self, match: re.Match, raw: str) -> LogEntry:
+        """Parse IIS W3C Extended Log Format"""
+        groups = match.groupdict()
+        
+        # Parse timestamp
+        timestamp = None
+        try:
+            date_str = groups.get('date', '')
+            time_str = groups.get('time', '')
+            if date_str and time_str:
+                timestamp = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+        
+        # Get HTTP status code
+        status = int(groups.get('status', 0))
+        level = self._http_status_to_level(status)
+        
+        # Get method and URI
+        method = groups.get('method', '')
+        uri_stem = groups.get('uri_stem', '')
+        message = f"{method} {uri_stem}"
+        
+        return LogEntry(
+            timestamp=timestamp,
+            level=level,
+            message=message,
+            raw=raw,
+            metadata={
+                "ip": groups.get('c_ip'),
+                "status": status,
+                "substatus": int(groups.get('substatus', 0)),
+                "win32_status": int(groups.get('win32_status', 0)),
+                "time_taken": int(groups.get('time_taken', 0)),
+                "uri_query": groups.get('uri_query'),
+                "user_agent": groups.get('user_agent', '')[:200],  # Truncate long UA
+                "port": int(groups.get('port', 0)),
+                "s_ip": groups.get('s_ip'),
+                "username": groups.get('username')
             }
         )
 

@@ -45,6 +45,9 @@ htmlcov/
 *.log
 logs/*.log
 
+# Reports
+reports/
+
 # OS
 .DS_Store
 Thumbs.db

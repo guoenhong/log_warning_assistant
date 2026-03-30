@@ -150,7 +150,7 @@ class OutputGenerator:
         md.append("")
         
         # Status indicator
-        status = output['analysis']['info_status']
+        status = output.get('info_status', 'sufficient')
         status_text = "✅ 信息充分" if status == "sufficient" else "⚠️ 信息不足"
         md.append(f"**状态**: {status_text}")
         md.append("")
